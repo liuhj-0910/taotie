@@ -25,6 +25,14 @@ hostnamectl set-hostname application
 hostnamectl set-hostname apachebench
 ```
 
+安装前说明：
+
+1、mysql安装包太大，github没有上传，需要去官网自行下载，我下载的版本是mysql-5.7.37-linux-glibc2.12-x86_64.tar.gz，放入\taotie\package\v1\mysql
+
+2、mvn clean package，将打好包的taotie.jar放入\taotie\package\v1\taotie
+
+3、将目录mysql、taotie、ab压缩为mysql.zip、taotie.zip、ab.zip
+
 
 
 mysql安装：
@@ -44,9 +52,17 @@ unzip mysql.zip && cd mysql && dos2unix *.sql *.sh && chmod +x *.sh
 ##环境变量生效
 source /etc/profile
 
+#安装完成后，验证
+##默认用户和密码已写入my.config
+$mysql  
+SQL> use lhj;
+SQL> show tables;
+##会看到已创建好64张表
+
+##如果需要卸载mysql
+./mysql-remove.sh
+
 ```
-
-
 
 springboot应用安装：
 
@@ -65,7 +81,7 @@ unzip taotie.zip && cd taotie && dos2unix *.sh && chmod +x *.sh
 vi /etc/hosts
 172.25.147.147  mysql.frag.com
 
-#启动
+#启动 推荐使用restart，会kill掉之前启动的应用
 ./taotie.sh restart
 
 ```
@@ -90,8 +106,18 @@ unzip ab.zip
 cd ab
 dos2unix *.sh && chmod +x *.sh 
 
+vi ab-test.sh
+##设置为你的应用程序的ip
+APPIP=172.25.147.148  
+
 #启动
 ./taotie.sh restart
+
+##查看日志,有业务日志，数据上报记录，gc日志，操作系统各种指标日志，用与支持后续系统参数调优的依据。
+cd ./log  
+
+#如需停止测试脚本
+./kill-ab-test.sh
 
 ```
 
@@ -277,7 +303,12 @@ taotie:
 
 
 
-现在我看看测试结果吧？
+现在看看测试结果吧？
+
+我测试的结果，单机可以到接近20000的并发数据入库。
+
+具体分析后面写吧，第一次写博客台费劲了，想起了高中时写作文。
+
 
 
 
