@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE configuration
+        PUBLIC "-//ibatis.apache.org//DTD Config 3.0//EN"
+        "http://ibatis.apache.org/dtd/ibatis-3-config.dtd">
+
+<configuration>
+    <settings>
+         <!-- 禁用二级缓存 -->
+        <setting name="cacheEnabled" value="false" />
+        <setting name="localCacheScope" value="STATEMENT" />
+        <!-- 将下划线的字段转换为驼峰格式的字段-->
+        <setting name="mapUnderscoreToCamelCase" value="true"/>
+        <!-- 当插入对象属性为空时的jdbcType类型，配了次属性则映射的SQL语句里可以省去指定jdbcType类型的麻烦。 -->
+        <setting name="jdbcTypeForNull" value="NULL"/>
+        <!-- 配合logback.xml使用，解决手工映射SQL日志的输出问题 -->
+        <setting name="logImpl" value="LOG4J2" />
+        <setting name="logPrefix" value="mapper."/>
+    </settings>
+</configuration>
