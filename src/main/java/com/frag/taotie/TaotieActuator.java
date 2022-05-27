@@ -1,7 +1,8 @@
-package com.frag.taotie.component;
+package com.frag.taotie;
 
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.concurrent.CustomizableThreadFactory;
+import com.frag.taotie.util.NamedThreadFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,34 +14,17 @@ import java.util.function.Function;
 /**
  * @author liuhj
  */
-@Slf4j
 public class TaotieActuator<T> {
+
+    private final Logger log = LoggerFactory.getLogger(TaotieActuator.class);
 
     private final static int QUEUE_POWER_MIN = 0;
     private final static int QUEUE_POWER_MAX = 10;
-    private final static float SINGLE_QUEUE_CAPACITY_FACTOR_DEFAULT = 0.25f;
-    private final static float MULTIPLE_QUEUE_CAPACITY_FACTOR_DEFAULT = 1.0f;
-    private final static int OFFER_TIMEOUT_DEFAULT = 10;
-    private final static int POLL_TIMEOUT_DEFAULT = 100;
-    private final static int SINGLE_QUEUE_BENCH_COMMIT_NUM_DEFAULT = 10000;
-
-    /**
-     * queuePower: 该值为2的幂数，计算2的幂后的结果为内部保存数据队列的数量。该数量与业务分库分表的表数量一致。
-     * 业务数据<T>根据lambda表达式getPartitionKey获取业务分区键，与(队列数量 - 1)做&运算后，保存到对应的数据队列中。
-     * 例：分库分表1024张表，对应1024的队列，则queuePower=10
-     */
-    private final int queuePower;
 
     /**
      * 从数据对象T中获取分区键的方法
      */
     private final Function<T, Number> getPartitionKey;
-
-    /**
-     * pollThreadNum: 该值为2的幂数，计算2的幂后的结果为用于从数据队列中出队数据的线程数
-     * 例：queuePower=10表示有1024个数据队列，pollThreadNum=2表示处理出队数据的线程为4个，则初始化时为每个线程分配固定256个队列
-     */
-    private final int pollThreadPower;
 
     /**
      * 每个数据队列，每benchCommitNum个数据批量提交一次
@@ -52,12 +36,6 @@ public class TaotieActuator<T> {
      * benchCommitNum * queueCapacityFactor = 队列的容量
      */
     private final float queueCapacityFactor;
-
-    /**
-     * 用于处理批量提交数据的线程数量，特别提醒该值不是2的幂数
-     * 每个pollThread在每个数据队列出队benchCommitNum后，或pollTimeout毫秒后没出队数据，则调用commitThread异步批量提交
-     */
-    private final int commitThreadNum;
 
     /**
      * 批量提交数据的业务方法
@@ -125,43 +103,19 @@ public class TaotieActuator<T> {
      */
     private final int queueCapacity;
 
-    public static <T> TaotieActuator singleQueueProcessor(Consumer<List<T>> benchCommit) {
-        return singleQueueProcessor(SINGLE_QUEUE_BENCH_COMMIT_NUM_DEFAULT, 1, benchCommit);
-    }
-
-    public static <T> TaotieActuator singleQueueProcessor(int benchCommitNum, int commitThreadNum, Consumer<List<T>> benchCommit) {
-        return singleQueueProcessor(benchCommitNum, commitThreadNum, SINGLE_QUEUE_CAPACITY_FACTOR_DEFAULT, benchCommit);
-    }
-
-    public static <T> TaotieActuator singleQueueProcessor(int benchCommitNum, int commitThreadNum, float queueCapacityFactor, Consumer<List<T>> benchCommit) {
-        return singleQueueProcessor(benchCommitNum, commitThreadNum, queueCapacityFactor, OFFER_TIMEOUT_DEFAULT, POLL_TIMEOUT_DEFAULT, benchCommit);
-    }
-
-    public static <T> TaotieActuator singleQueueProcessor(int benchCommitNum, int commitThreadNum, float queueCapacityFactor, int offerTimeout, int pollTimeout, Consumer<List<T>> benchCommit) {
-        return new TaotieActuator(0, benchCommitNum, 0, commitThreadNum, queueCapacityFactor, offerTimeout, pollTimeout, benchCommit, null);
-    }
-
-    public static <T> TaotieActuator multipleQueueProcessor(int queuePower, int benchCommitNum, int pollThreadPower, int commitThreadNum, Consumer<List<T>> benchCommit, Function<T, Number> getHashKey) {
-        return multipleQueueProcessor(queuePower, benchCommitNum, pollThreadPower, commitThreadNum, MULTIPLE_QUEUE_CAPACITY_FACTOR_DEFAULT, benchCommit, getHashKey);
-    }
-
-    public static <T> TaotieActuator multipleQueueProcessor(int queuePower, int benchCommitNum, int pollThreadPower, int commitThreadNum, float queueCapacityFactor, Consumer<List<T>> benchCommit, Function<T, Number> getHashKey) {
-        return multipleQueueProcessor(queuePower, benchCommitNum, pollThreadPower, commitThreadNum, queueCapacityFactor, OFFER_TIMEOUT_DEFAULT, POLL_TIMEOUT_DEFAULT, benchCommit, getHashKey);
-    }
-
-    public static <T> TaotieActuator multipleQueueProcessor(int queuePower, int benchCommitNum, int pollThreadPower, int commitThreadNum, float queueCapacityFactor, int offerTimeout, int pollTimeout, Consumer<List<T>> benchCommit, Function<T, Number> getHashKey) {
-        return new TaotieActuator(queuePower, benchCommitNum, pollThreadPower, commitThreadNum, queueCapacityFactor, offerTimeout, pollTimeout, benchCommit, getHashKey);
-    }
-
     /**
-     * @param queuePower
+     * @param queuePower      该值为2的幂数，计算2的幂后的结果为内部保存数据队列的数量。该数量与业务分库分表的表数量一致。
+     *                        业务数据<T>根据lambda表达式getPartitionKey获取业务分区键，与(队列数量 - 1)做&运算后，保存到对应的数据队列中。
+     *                        例：分库分表1024张表，对应1024的队列，则queuePower=10
      * @param benchCommitNum  批量提交数量
-     * @param pollThreadPower
-     * @param commitThreadNum 批量提交线程数
+     * @param pollThreadPower 该值为2的幂数，计算2的幂后的结果为用于从数据队列中出队数据的线程数
+     *                        例：queuePower=10表示有1024个数据队列，pollThreadNum=2表示处理出队数据的线程为4个，则初始化时为每个线程分配固定256个队列
+     * @param commitThreadNum 用于处理批量提交数据的线程数量，特别提醒该值不是2的幂数
+     *                        每个pollThread在每个数据队列出队benchCommitNum后，或pollTimeout毫秒后没出队数据，则调用commitThread异步批量提交
      * @param offerTimeout    数据入队的超时时间，单位为毫秒
      * @param pollTimeout     数据出队的超时时间，单位为毫秒
      * @param benchCommit     批量提交数据的业务方法
-     * @param getPartitionKey
+     * @param getPartitionKey 从数据对象T中获取分区键的方法
      */
     public TaotieActuator(int queuePower, int benchCommitNum, int pollThreadPower, int commitThreadNum, float queueCapacityFactor, int offerTimeout, int pollTimeout, Consumer<List<T>> benchCommit, Function<T, Number> getPartitionKey) {
         if (queuePower < QUEUE_POWER_MIN || queuePower > QUEUE_POWER_MAX) {
@@ -195,10 +149,7 @@ public class TaotieActuator<T> {
             throw new IllegalArgumentException("多数据队列，参数getPartitionKey必须设置");
         }
 
-        this.queuePower = queuePower;
         this.benchCommitNum = benchCommitNum;
-        this.pollThreadPower = pollThreadPower;
-        this.commitThreadNum = commitThreadNum;
         this.offerTimeout = offerTimeout;
         this.pollTimeout = pollTimeout;
         this.benchCommit = benchCommit;
@@ -212,7 +163,7 @@ public class TaotieActuator<T> {
 
         // 初始化出队数据结构
         if (pollThreadNum == 1) {
-            // pollThreadNum=0，则一个线程处理全部队列，退化为单list
+            // pollThreadNum=1，则一个线程处理全部队列，退化为单list
             this.singlePollThreadList = new ArrayList<>(queueNum);
             this.pollList = null;
         } else {
@@ -236,12 +187,17 @@ public class TaotieActuator<T> {
                 BlockingQueue<T> q = newQueue();
                 multipleQueue.put(i, q);
 
-                pollList.get(i & (pollThreadNum - 1)).add(q);
+                if (pollThreadNum == 1) {
+                    // pollThreadNum=1，则一个线程处理全部队列，退化为单list
+                    singlePollThreadList.add(q);
+                } else {
+                    pollList.get(i & (pollThreadNum - 1)).add(q);
+                }
             }
         }
 
-        this.pollThreadPool = Executors.newFixedThreadPool(pollThreadNum, new CustomizableThreadFactory("pollThread-pool-"));
-        this.commitThreadPool = Executors.newFixedThreadPool(commitThreadNum, new CustomizableThreadFactory("commitThread-pool-"));
+        this.pollThreadPool = Executors.newFixedThreadPool(pollThreadNum, new NamedThreadFactory("pollThread-pool-"));
+        this.commitThreadPool = Executors.newFixedThreadPool(commitThreadNum, new NamedThreadFactory("commitThread-pool-"));
 
         process();
     }
@@ -271,6 +227,7 @@ public class TaotieActuator<T> {
     }
 
     private void process() {
+        // 单队列 单线程
         if (1 == queueNum) {
             pollThreadPool.execute(() -> {
                 while (true) {
@@ -278,15 +235,26 @@ public class TaotieActuator<T> {
                 }
             });
         } else {
-            for (int i = 0; i < pollThreadNum; i++) {
-                List<BlockingQueue<T>> list = pollList.get(i);
+            if (pollThreadNum == 1) {
+                // 多队列 单线程
                 pollThreadPool.execute(() -> {
                     while (true) {
-                        for (BlockingQueue<T> ts : list) {
+                        for (BlockingQueue<T> ts : singlePollThreadList) {
                             processQueue(ts);
                         }
                     }
                 });
+            } else {
+                for (int i = 0; i < pollThreadNum; i++) {
+                    List<BlockingQueue<T>> list = pollList.get(i);
+                    pollThreadPool.execute(() -> {
+                        while (true) {
+                            for (BlockingQueue<T> ts : list) {
+                                processQueue(ts);
+                            }
+                        }
+                    });
+                }
             }
         }
     }
